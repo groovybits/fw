@@ -1,0 +1,6 @@
+! eth0 OUTPUT
+!
+!permit 2 any any
+permit 47 any any
+!
+permit ip any any

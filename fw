@@ -1,0 +1,143 @@
+#!/usr/bin/perl
+
+# Firewall base configuration script
+# Chris Kennedy, (C) 2000
+
+$cfgdir = "/etc/fw";
+
+if (`id -u` != 0) {
+  print "Error... You must be root to run this\n";
+  exit 0;
+}
+
+$chgdate = `date`;
+chomp($chgdate);
+
+require "$cfgdir/config.pl";   # General Defines
+require "$cfgdir/commands.pl"; # Functional Commands
+require "$cfgdir/cisco.pl";    # Cisco to Linux Conversions
+require "$cfgdir/cli.pl";      # Command Line Interface
+
+&getInterfaces(); # Get the interfaces array 
+
+if ($ARGV[0] =~ /^list/) {
+  print "\nAccess-Lists:\n";
+  print `$cmd -L -n`; 
+  exit 0;
+} elsif ($ARGV[0] =~ /^conf/) {
+  &CLI();
+  exit 0;
+} elsif ($ARGV[0] eq 'stop') {
+  &clearRules();
+  &loadModules($ARGV[0]);
+  system("$cfgdir/cbq $ARGV[0]");
+  exit 0;
+} elsif ($ARGV[0] eq 'start') {
+  &loadModules($ARGV[0]);
+  system("$cfgdir/cbq $ARGV[0]");
+  &clearRules();
+} elsif ($ARGV[0] eq 'cbq') {
+  system("$cfgdir/cbq $ARGV[1] $ARGV[2]");
+  exit 0;
+} else {
+  print "Invalid startup command!\n";
+  print "Usage: $0 [start|stop|config|cbq|list]\n\n";
+  exit 0;
+}
+
+open(CMDFILE, ">$cfgdir/$runcfg");
+select(CMDFILE);
+
+# Startup the firewall and activate it.
+foreach $int (@interfaces) {
+  foreach $table (@tables) {
+    if ($table eq 'INPUT' || $table eq 'input') {
+      $tname = "$int" . "_i";
+      $ci_dir = "in";
+    } elsif( $table eq 'OUTPUT' || $table eq 'output') {
+      $tname = "$int" . "_o";
+      $ci_dir = "out";
+    } elsif( $table eq 'FORWARD' || $table eq 'forward') {
+      $tname = "$int" . "_f";
+      $ci_dir = "fwd";
+    } elsif( $table eq 'PREROUTING') {
+      $tname = "$int" . "_i";
+      $ci_dir = "pre";
+    } elsif( $table eq 'POSTROUTING') {
+      $tname = "$int" . "_o";
+      $ci_dir = "post";
+    } else {
+      next;
+    }
+
+    # If table config exists then add the table.
+    if ( -f "$cfgdir/$db/interface/$int/$table" ) {
+      if ($debug == 1){print "!\n!\n! $cmd -N $tname\n"};
+      `$cmd -N $tname`;
+
+      if ($table eq 'OUTPUT') {
+        if ($debug == 1){print "! $cmd -A $table -o $int -j $tname\n"};
+        print "!\ninterface $int\n";
+        print " access-group $tname $ci_dir\n!\n"; 
+        `$cmd -A $table -o $int -j $tname`;
+      } else {
+        if ($debug == 1){print "! $cmd -A $table -i $int -j $tname\n"};
+        print "!\ninterface $int\n";
+        print " access-group $tname $ci_dir\n!\n"; 
+        `$cmd -A $table -i $int -j $tname`;
+      }
+
+      open(INTCONF, "$cfgdir/$db/interface/$int/$table");
+      @config = <INTCONF>;
+      close(INTCONF);
+
+      foreach $line (@config) {
+        chomp($line);
+        if ($line !~ /^\#/ && $line !~ /^\!/ && $line !~ /^$/ ) {
+          # Convert from Cisco To Linux Syntax.
+          &citoli($line);
+
+          # Build the Command Line
+          &buildcmd();
+
+          # Execute Commands
+	  if ($extra eq 'log') {
+            `$cmd $logargs`;
+            if ($debug == 1){print "!\n! $cmd $logargs\n"};
+	  }
+          if($extra =~ /^portfw$/ || $extra =~ /^redir$/ || $extra =~ /^proute$/) {
+	    `$cmd $args`;
+            if ($debug == 1){print "!\n! $cmd $args\n"};
+
+	    # CKENNEDY - REMOVED
+            #if ($extra =~ /^redir$/) {
+            #  $args =~ s/PREROUTING/OUTPUT/g;
+            #  $args =~ s/-i\s\w+\d+\s//g;
+            #  `$cmd $args`;
+            #  if ($debug == 1){print "!\n! $cmd $args\n"};
+            #}
+          } elsif($extra =~ /^shape$/) {
+            $args =~ s/ shape//g;
+            $burst = $arg0;
+            $burst =~ s/\/.*$//g;
+            `$cmd $args -m limit --limit $arg0 --limit-burst $burst`; 
+            if ($debug == 1){print "!\n! $cmd $args -m limit --limit $arg0 --limit-burst $burst\n"};
+          } else {
+             $args =~ s/REJECT/REJECT --reject-with icmp-admin-prohibited/g;
+            `$cmd $args`; 
+            #`$cmd $args`; 
+            if ($debug == 1){print "!\n! $cmd $args\n"};
+          }
+          print "access-list $tname $oline\n";
+          $extra = '';
+        }
+      }
+    }
+  }
+}
+close(CMDFILE);
+select(STDOUT);
+
+print "Firewall Started.\n";
+
+exit 0;

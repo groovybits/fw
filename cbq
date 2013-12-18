@@ -1,0 +1,347 @@
+#!/usr/bin/perl
+# CBQ Script, (C) 2001 Chris Kennedy <getdown@groovy.org>
+
+$tc = "/sbin/tc";
+$location = "/etc/fw/base/cbq";
+$total_bandw = '10Mbit';
+$total_rate  = '10Mbit';
+$total_weigh = '1Mbit';
+$active = 1;
+$sfq = 0;
+
+($ACTION, $verbose) = @ARGV;
+if ($ACTION =~ /^sta/) {
+  `$0 stop >/dev/null 2>&1`;
+  $ACTION = 'add';
+} elsif ($ACTION =~ /^sto/) {
+  $ACTION = 'del';
+} elsif ($ACTION =~ /^li/) {
+  opendir(DEVICES,"$location");
+  @devices = grep !/^\.\.?$/,readdir DEVICES;
+  closedir(DEVICES);
+  foreach (@devices) {
+    $DEV = $_;
+    $DEV =~ s/\n//g;
+    if ($DEV !~ /^[a-zA-Z0-9]+\d+$/){next};
+    print "interface $DEV\n";
+    &show_rules;
+  }
+  exit 0;
+} elsif ($ACTION =~ /^cl/) {
+  opendir(DEVICES,"$location");
+  @devices = grep !/^\.\.?$/,readdir DEVICES;
+  closedir(DEVICES);
+  foreach (@devices) {
+    $DEV = $_;
+    $DEV =~ s/\n//g;
+    if ($DEV !~ /^[a-zA-Z0-9]+\d+$/){next};
+    print "Interface $DEV\n";
+    &show_classes;
+  }
+  exit 0;
+} else {
+  &error;
+  exit 1;
+}
+if ($ACTION eq 'del') {
+  $NULL = " >/dev/null 2>&1";
+}
+#######################################################
+opendir(DEVICES,"$location");
+@devices = grep !/^\.\.?$/,readdir DEVICES;
+closedir(DEVICES);
+$i = 100; $j = 0;
+$x = 0; $y = 1;
+foreach (@devices) {
+  $x += 1; $y += 1;
+  $i = 100; $j = 0;
+  $results = '';
+  $DEV = $_;
+  $DEV =~ s/\n//g;
+  if ($DEV !~ /^[a-zA-Z0-9]+\d+$/){next};
+  $j++;
+  ## ROOT CBQ DEVICE 1:0 
+  $cmd = "$tc qdisc $ACTION dev $DEV root handle $j:0 cbq ";
+  #$cmd.= "bandwidth $total_bandw avpkt 1000 mpu 64";
+  $cmd.= "bandwidth $total_bandw avpkt 1000";
+  # Execute command
+  if ($active == 1){$results = `$cmd $NULL`};
+  if ($verbose == 1) {
+    ($a, $b) = split (/ cbq /, $cmd);
+    ($b, $c) = split (/ prio /, $b);
+    printf ("%s cbq \\\n\t%s", $a, $b);
+    if($c) {
+      printf (" \\\n\tprio %s\n", $c);
+    } else {
+      printf ("\n");
+    }
+  }
+
+  ## CLASS BASE CBQ DEVICE 1:1  
+  $cmd = "$tc class $ACTION dev $DEV parent $j:0 classid $j:1 cbq ";
+  #$cmd.= "bandwidth $total_bandw rate $total_rate ";
+  $cmd.= "rate $total_rate ";
+  #$cmd.= "weight $total_weigh prio 8 maxburst 20 avpkt 1000 bounded isolated";
+  $cmd.= "allot 1500 prio 5 bounded isolated";
+  # Execute command
+  if ($active == 1){$results.= `$cmd $NULL`};
+  if ($verbose == 1) {
+    ($a, $b) = split (/ cbq /, $cmd);
+    ($b, $c) = split (/ prio /, $b);
+    printf ("  %s cbq \\\n\t%s", $a, $b);
+    if($c) {
+      printf (" \\\n\tprio %s\n", $c);
+    } else {
+      printf ("\n");
+    }
+  }
+  if ($ACTION eq 'del') {
+    next;
+  }
+
+  $priority = 1;
+  ## Get Configuration for Interface
+  open (RULES, "<$location/$_");
+  while (<RULES>) {
+    $rule = $_;
+    $rule =~ s/\n//g;
+    if ($rule =~ /^\!/ || $rule =~ /^$/){next};
+    # CLASS BASE OF BANDWIDTH 
+    if ($rule =~ /^class /) {
+      # INCREMENT FLOWID
+      $i++;
+
+      ($j1, $pri, $indiv_limit, $indiv_weight, $bounded, $isolated) =
+	split (/ /, $rule);
+
+      $cmd = "$tc class $ACTION dev $DEV parent $j:1 classid $j:$i cbq ";
+      #$cmd.= "bandwidth $total_bandw rate $indiv_limit ";
+      $cmd.= "rate $indiv_limit ";
+      #$cmd.= "weight $indiv_weight prio $pri maxburst 20 avpkt 1000 ";
+      $cmd.= "allot 1500 prio $pri ";
+      $cmd.= "$bounded $isolated";
+      # Execute command
+      if ($active == 1){$results.= `$cmd $NULL`};
+      if ($verbose == 1) {
+        ($a, $b) = split (/ cbq /, $cmd);
+        ($b, $c) = split (/ prio /, $b);
+        printf ("    %s cbq \\\n\t%s", $a, $b);
+        if($c) {
+          printf (" \\\n\tprio %s\n", $c);
+        } else {
+          printf ("\n");
+        }
+      }
+  
+      # Choose type of queue, SFQ or TB.
+      if ($sfq == 1) {
+        $cmd = "$tc qdisc $ACTION dev $DEV parent $j:$i sfq quantum 1514b ";
+        $cmd.= "perturb 10 $NULL";
+      } else {
+        $cmd = "$tc qdisc $ACTION dev $DEV parent $j:$i tbf ";
+        #$cmd.= "rate $total_rate buffer $total_rate/8 limit $total_weigh";
+        $cmd.= "rate $total_rate latency 50ms burst 1540";
+      }
+
+      # Execute command
+      if ($active == 1){$results.= `$cmd $NULL`};
+      if ($verbose == 1) { 
+        print "    $cmd\n";
+      }
+    } elsif ($rule =~ /^ match/) {
+      $rule =~ s/^\s+//g;
+      $rule =~ s/\n//g;
+      $cmd = "$tc filter $ACTION dev $DEV parent $j:0 protocol ip prio $priority u32 ";
+      #$cmd.= "$rule flowid $j:$i";
+      $cmd.= "$rule police rate $indiv_limit burst 10k drop flowid $j:$i";
+      # Execute command
+      if ($active == 1){$results.= `$cmd $NULL`};
+      if ($verbose == 1) { 
+        ($a, $b) = split (/ u32 /, $cmd);
+        print "    $a u32 \\\n\t$b\n";
+        print "\n";
+      }
+    }
+  }
+  close (RULES);
+  print "\nFinished Adding Traffic Control Rules:\n\n";
+}
+
+## SUBROUTINES
+sub error 
+{
+  print "Usage: $0 [start|stop|list|class] [1]\n";
+  print "\tstart/stop  -  Start or Stop Rules.\n";
+  print "\tlist        -  List out current Rules.\n";
+  print "\tclass       -  List out current Classes Stats.\n";
+  print "\t1           -  Run with 'start 1' to list out commands too.\n";
+}
+
+sub show_rules 
+{
+  open (RULES, "<$location/$_");
+  while (<RULES>) {
+    $rule = $_;
+    if ($rule =~ /^\!/ || $rule =~ /^$/){next};
+    print " $rule";
+  }
+  print "!\n";
+}
+
+sub show_classes
+{
+  @class_output = `$tc -s -d class show dev $DEV`;
+  @filter_output = `$tc -s -d filter show dev $DEV`;
+  push @class_output, "class ";
+  foreach (@class_output) {
+    if ($_ =~ /^class /) {
+      if ($line ne '') {
+        $line =~ s/\n//g;
+        $line =~ s/\s+/ /g;
+        $line =~ s/[\(\)\,]//g;
+        $line =~ s/root/root 0:0/g;
+        $line =~ s/\:\s/:0 /g;
+        if ($line !~ /leaf/ && $line !~ /root/) {
+          $line =~ s/:0 rate/:0 leaf 0: 0 rate/g;
+        }
+        if ($line !~ /bounded/ &&
+                $line !~ /isolated/ &&
+                $line !~ /cbq\s\d:1\s/)
+        {
+          $line =~ s/prio/\(\) prio/g;
+        }
+
+        ($j1, $type, $handle, $j2, $parent, $j3, $leaf, $j4, $rate,
+          $j5, $cell, $flags, $j6, $priority, $j7, $weight, $j8, $allot,
+          $j9, $level, $j10, $ewma, $j11, $avpkt, $j12, $maxidle,
+          $j13, $sentbytes, $j14, $sentpkts, $j15, $j16, $dropped,
+          $j17, $overlimits, $j18, $borrowed, $j19, $overactions,
+          $j20, $avgidle, $j21, $undertime) = split (/ /, $line);
+
+        $hexoff = ''; $match = 0;
+        foreach $filter (@filter_output) {
+          if ($filter =~ / flowid $handle /) {
+            $char1 = ''; $char2 = '';
+            $match = 1;
+          }
+          if ($match == 1 && $filter =~ /  match/) {
+            $filter =~ s/^\s+//g;
+            ($j1, $hexfield, $j2, $offset) = split (/ /, $filter);
+            ($hex1, $hex2) = split (/\//, $hexfield);
+            while ($hex1 ne '') {
+              $data = substr($hex1,0,2);
+              $char = unpack("a4", hex($data));
+              $char1.= " $char";
+              $hex1 =~ s/^$data//g; 
+              $counter++;
+              if ($counter >= 10){print "Looping $hex1\n"; exit 1};
+            }
+            $counter = 0;
+            if ($offset == 16 || $offset == 12) {
+              $char1 =~ s/^\s+//g;
+              $char1 =~ s/\s+/./g;
+              $hex2 =~ s/^0x//g;
+              while ($hex2 ne '') {
+                $data = substr($hex2,0,2);
+                $char = unpack("a4", hex($data));
+                $char2.= " $char";
+                $hex2 =~ s/^$data//g;
+                $counter++;
+                if ($counter >= 10){print "Looping $hex1\n"; exit 1};
+              }
+              $counter = 0;
+              $char2 =~ s/^\s+//g;
+              $char2 =~ s/\s+/./g;
+
+              $hexoff.= " ip $char1/$char2:";
+            } elsif ($offset == 8) {
+              ($aa, $a, $b, $c, $d) = split (/ /, $char1);
+              if ($b == 6) { 
+                $hexoff.= " tcp";
+              } elsif ($b == 17) {
+                $hexoff.= " udp";
+              } elsif ($b == 1) {
+                $hexoff.= " icmp";
+              } else {
+                 $hexoff.= " ip $b";
+              }
+            } elsif ($offset == 20) {
+              ($aa, $a, $b, $c, $d, $e, $f) = split (/ /, $char1);
+              $ef = $e * 256;
+              $port = $ef + $f;
+              $hexoff.= " port $port:";
+            } else {
+              $hexoff.= " match $char1/$hex2 at $offset:";
+            }
+          } elsif ($filter !~ / flowid $handle /) {
+            $match = 0;
+          }
+        }
+        $data = "$type, $handle, $parent, $leaf, $rate, $cell, $flags, $priority,
+          $weight, $allot, $level, $ewma, $avpkt, $maxidle, $sentbytes,
+          $sentpkts, $dropped, $overlimits, $borrowed, $overactions, $avgidle,
+          $undertime, $backlog, $hexoff\n";
+  
+        $handle =~ s/^\d\://g;
+	if ($type eq "cbq") {
+        	push @classes, "$handle:$data";
+	}
+        $data =~ s/\n/ /g;
+        $data =~ s/\s+/ /g;
+        $line = ''; $data = ''; $backlog = '';
+      }
+      $line.= $_;
+    } elsif ($_ =~ /^level /) {
+      $line.= $_;
+    } elsif ($_ =~ /^ Sent /) {
+      $line.= $_;
+    } elsif ($_ =~ /^  borrowed /) {
+      $line.= $_;
+    } elsif ($_ =~ /^\s+backlog /) {
+      $backlog = $_;
+    }
+  }
+  close (CLASSES);
+  
+  @classes2 = sort { $a <=> $b } @classes;
+  @classes = ();
+  foreach (@classes2) {
+    $_ =~ s/^(\d+\:+)+//g;
+    $_ =~ s/\n//g;
+    $_ =~ s/\s+/ /g;
+  
+    ($type, $handle, $parent, $leaf, $rate, $cell, $flags, $priority,
+          $weight, $allot, $level, $ewma, $avpkt, $maxidle, $sentbytes,
+          $sentpkts, $dropped, $overlimits, $borrowed, $overactions, $avgidle,
+          $undertime, $backlog, $hexoff) = split (/\, /, $_);
+  
+    if ($detail_stats == 1) {
+      print "Type: $type Handle: $handle Parent: $parent Leaf: $leaf\n";
+      print " Rate: $rate Cell: $cell Flags: $flags Priority: $priority\n";
+      print " Weight: $weight Allot: $allot Level: $level Ewma: $ewma\n";
+      print " Avpkt: $avpkt Maxidle: $maxidle SentBytes: $sentbytes\n";
+      print " SentPkts: $sentpkts Dropped: $dropped Overlimits: $overlimits\n";
+      print " Borrowed: $borrowed Overactions: $overactions Avgidle: $avgidle\n";
+      print "  Undertime: $undertime\n\n";
+    } else {
+      @hexarray = split (/: /, $hexoff);
+      $flags =~ s/boundedisolated/bounded\/isolated/g;
+      if ($handle =~ /^\d+:0$/) {
+        print " $handle [$weight] $priority $flags\n";
+      } elsif ($handle =~ /^\d+:1$/) {
+        next;
+      } else {
+        print " $handle [$rate $weight] $priority $flags\n";
+      }
+      print " bytes $sentbytes pkts $sentpkts ";
+      print "drop $dropped over $overlimits borrow $borrowed ";
+      print "overaction $overactions $backlog\n";
+      foreach $hexline (@hexarray) {
+        $hexline =~ s/://g;
+        print "  match $hexline\n";
+      }
+      print "\n";
+    }
+  }
+  
+}

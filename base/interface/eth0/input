@@ -1,0 +1,74 @@
+! eth0 INPUT
+!
+permit tcp any any established
+!
+permit ip 192.168.0.0 0.0.255.255 any
+permit ip 10.0.0.0 0.255.255.255 any
+permit udp 0.0.0.0 255.255.255.255 any
+!
+! Allowed World Services
+permit tcp any any eq 22
+permit tcp any any eq 25
+permit tcp any any eq 80
+permit tcp any any eq 995
+permit udp any any eq 500
+!
+permit tcp any any eq 113
+!
+! bittorrent
+permit tcp any any range 6881 6889
+permit udp any any range 6881 6889
+! 
+! Blocked World Services
+deny tcp any any eq 2049
+deny tcp any any eq 21
+deny tcp any any eq 22
+deny tcp any any eq 23
+deny tcp any any eq 53
+deny tcp any any eq 80
+deny tcp any any eq 111
+deny tcp any any eq 139
+deny tcp any any eq 135
+deny tcp any any eq 137
+deny udp any any eq 137
+deny tcp any any eq 389
+deny tcp any any eq 445
+deny tcp any any eq 1024
+deny tcp any any eq 8080
+deny tcp any any eq 8000
+deny tcp any any eq 1080
+deny udp any any eq 1434
+deny udp any any eq 2049
+deny udp any any eq 3000
+deny udp any any eq 3268
+deny udp any any eq 3269
+deny tcp any any eq 3389
+!
+! NTP Servers
+permit udp any eq 123 any eq 123
+!
+! HIGH PORTS ALLOWANCE
+!
+!permit tcp any any range 32768 61000 
+!permit udp any any range 32768 61000 
+permit tcp any any gt 1023
+permit udp any any gt 1023
+!
+! ICMP RULES
+!
+permit icmp any any eq 0
+permit icmp any any 0/0 eq 3
+permit icmp any any 0/0 eq 4
+permit icmp any any 0/0 eq 8
+permit icmp any any 0/0 eq 11
+permit icmp any any 0/0 eq 12
+!
+! ODD Protocols
+permit 2 any any
+permit 47 any any
+!permit 41 any any
+!permit 50 any any
+!
+!
+deny ip any any log
+!

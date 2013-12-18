@@ -1,0 +1,19 @@
+!
+! BEGIN SNAT HOSTS
+!
+!
+! SNAT Rules
+permit ip host 192.168.254.198 host 192.168.253.198 snat
+! All the rest
+permit ip 192.168.254.0 0.0.0.255 host 192.168.253.254 snat
+! Entire network
+permit ip 192.168.253.0 0.0.0.255 host 192.168.253.254 snat
+
+permit tcp host 192.168.253.108 eq 22 host 192.168.254.108 eq 22 redir
+permit tcp host 192.168.253.254 eq 80 host 192.168.254.108 eq 80 redir
+permit tcp host 192.168.253.254 eq 8080 host 192.168.254.108 eq 8080 redir
+permit tcp host 192.168.253.254 eq 443 host 192.168.254.108 eq 443 redir
+
+permit ip any any
+!
+!

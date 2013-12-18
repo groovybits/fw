@@ -1,0 +1,53 @@
+!
+!
+class 1 16Kbit 1.6Kbit isolated
+ match ip src 10.0.0.0/8
+ match ip src 192.168.10.0/24
+!
+class 2 8Kbit 0.8Kbit
+ match ip src 205.242.230.0/23
+ match ip src 204.87.167.0/24
+ match ip src 216.74.192.0/19
+!
+class 1 8Kbit 0.8Kbit isolated
+ match ip protocol 6 0xff match ip sport 22 0xffff
+ match ip protocol 6 0xff match ip sport 23 0xffff
+ match ip protocol 6 0xff match ip sport 25 0xffff
+ match ip protocol 6 0xff match ip sport 53 0xffff
+ match ip protocol 17 0xff match ip sport 53 0xffff
+ match ip protocol 6 0xff match ip sport 113 0xffff
+ match ip protocol 17 0xff match ip sport 123 0xffff
+ match ip protocol 17 0xff match ip sport 514 0xffff
+ match ip protocol 6 0xff match ip sport 3306 0xffff
+ match ip protocol 17 0xff match ip sport 161 0xffff
+ match ip protocol 17 0xff match ip sport 1645 0xffff
+ match ip protocol 17 0xff match ip sport 1646 0xffff
+!
+class 2 28Kbit 2.8Kbit bounded isolated
+ match ip protocol 6 0xff match ip sport 20 0xffff
+ match ip protocol 6 0xff match ip sport 21 0xffff
+ match ip protocol 6 0xff match ip sport 80 0xffff
+ match ip protocol 6 0xff match ip sport 110 0xffff
+ match ip protocol 6 0xff match ip sport 143 0xffff
+ match ip protocol 6 0xff match ip sport 443 0xffff
+ match ip protocol 6 0xff match ip sport 119 0xffff
+ match ip protocol 6 0xff match ip sport 993 0xffff
+ match ip protocol 6 0xff match ip sport 3128 0xffff
+!
+class 2 28Kbit 2.8Kbit bounded
+ match ip protocol 6 0xff match ip sport 6699 0xffff
+ match ip protocol 6 0xff match ip sport 8888 0xffff
+ match ip protocol 6 0xff match ip sport 1214 0xffff
+!
+class 4 9960000Kbit 996Kbit bounded isolated
+ match ip protocol 17 0xff match ip sport 111 0xffff
+ match ip protocol 6 0xff match ip sport 2049 0xffff
+ match ip protocol 17 0xff match ip sport 2049 0xffff
+! match ip src 2.4.1.69
+!
+class 3 4Kbit 0.4Kbit
+ match ip protocol 6 0xff match ip sport 32768 0xff00
+!
+class 3 4Kbit 0.4Kbit
+ match ip src 0/0
+!
